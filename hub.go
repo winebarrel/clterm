@@ -115,7 +115,7 @@ func (h *Hub) runSession() error {
 		return err // pre-stream error (e.g. missing group, no permission)
 	}
 	stream := out.GetStream()
-	defer stream.Close()
+	defer stream.Close() //nolint:errcheck
 
 	for {
 		select {
