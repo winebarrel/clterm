@@ -1,5 +1,8 @@
 # clterm
 
+[![CI](https://github.com/winebarrel/clterm/actions/workflows/ci.yml/badge.svg)](https://github.com/winebarrel/clterm/actions/workflows/ci.yml)
+[![AI Generated](https://img.shields.io/badge/AI%20Generated-Claude-orange?logo=anthropic)](https://claude.ai/claude-code)
+
 Real-time, `tail -f`-style viewer for **Amazon CloudWatch Logs**, rendered in a
 browser terminal. Backed by the CloudWatch Logs
 [Live Tail](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs_LiveTail.html)
