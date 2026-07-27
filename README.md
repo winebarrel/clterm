@@ -53,17 +53,20 @@ Multi-arch images (amd64/arm64) are published to
 `ghcr.io/winebarrel/clterm` on each release.
 
 ```sh
+# mount ~/.aws
 docker run --rm -p 8080:8080 \
   -e AWS_REGION=ap-northeast-1 \
-  -v ~/.aws:/home/nonroot/.aws:ro -e AWS_PROFILE=your-profile \
+  -v ~/.aws:/home/nonroot/.aws -e AWS_PROFILE=your-profile \
+  ghcr.io/winebarrel/clterm:latest
+
+# or pass credentials as env vars
+docker run --rm -p 8080:8080 \
+  -e AWS_REGION=ap-northeast-1 \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
   ghcr.io/winebarrel/clterm:latest
 
 # then open http://localhost:8080/tail?group=/aws/lambda/your-fn
 ```
-
-Supply credentials the usual container ways: env vars
-(`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`), a
-mounted `~/.aws`, or an instance/task role (EC2/ECS/EKS) with no extra config.
 
 ## URL scheme
 
