@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -17,6 +18,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/gorilla/websocket"
 )
+
+// version is overwritten at release time via -ldflags "-X main.version=...".
+var version = "dev"
 
 //go:embed web/terminal.html
 var terminalHTML []byte
@@ -52,7 +56,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		srv.handleWS(w, r)
 	case r.URL.Path == "/tail":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(terminalHTML)
+		_, _ = w.Write(terminalHTML)
 	case strings.HasPrefix(r.URL.Path, "/vendor/"):
 		srv.static.ServeHTTP(w, r)
 	default:
@@ -90,10 +94,10 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 func (s *subscriber) readPump(conn *websocket.Conn) {
 	defer func() {
 		s.hub.remove(s)
-		conn.Close()
+		_ = conn.Close()
 	}()
 	conn.SetReadLimit(512)
-	conn.SetReadDeadline(time.Now().Add(pongWait))
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(pongWait))
 	})
@@ -108,14 +112,14 @@ func (s *subscriber) writePump(conn *websocket.Conn) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		conn.Close()
+		_ = conn.Close()
 	}()
 	for {
 		select {
 		case msg, ok := <-s.send:
-			conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok { // hub closed the channel
-				conn.WriteMessage(websocket.CloseMessage, nil)
+				_ = conn.WriteMessage(websocket.CloseMessage, nil)
 				return
 			}
 			if d := atomic.SwapUint64(&s.dropped, 0); d > 0 {
@@ -129,7 +133,7 @@ func (s *subscriber) writePump(conn *websocket.Conn) {
 				return
 			}
 		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -142,7 +146,13 @@ func main() {
 	region := flag.String("region", "", "AWS region (default: from AWS config / AWS_REGION)")
 	linger := flag.Duration("linger", 15*time.Second,
 		"keep a Live Tail session open this long after the last viewer leaves")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	var opts []func(*config.LoadOptions) error
 	if *region != "" {

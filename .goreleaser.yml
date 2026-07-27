@@ -1,0 +1,31 @@
+version: 2
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - id: clterm
+    main: .
+    binary: clterm
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+checksum:
+  name_template: "checksums.txt"
+nfpms:
+  - file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Arch }}"
+    homepage: https://github.com/winebarrel/clterm
+    description: Real-time, tail -f-style viewer for Amazon CloudWatch Logs.
+    license: Apache-2.0
+    maintainer: "Genki Sugawara <sugawara@winebarrel.jp>"
+    formats:
+      - apk
+      - deb
+      - rpm
