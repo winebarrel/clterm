@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"flag"
+	"io/fs"
 	"log"
 	"net/http"
 	"strconv"
@@ -20,6 +21,12 @@ import (
 //go:embed web/terminal.html
 var terminalHTML []byte
 
+// Vendored xterm.js assets, served from /vendor/ so the page has no
+// external (CDN) dependencies.
+//
+//go:embed web/vendor
+var vendorFS embed.FS
+
 const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
@@ -33,18 +40,21 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	mgr *Manager
+	mgr    *Manager
+	static http.Handler // serves the embedded /vendor/ assets
 }
 
-// ServeHTTP routes the two endpoints. The log group is passed as the
-// ?group= query parameter, so no path parsing is involved.
+// ServeHTTP routes the endpoints. The log group is passed as the ?group=
+// query parameter, so no path parsing is involved.
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Path {
-	case "/ws":
+	switch {
+	case r.URL.Path == "/ws":
 		srv.handleWS(w, r)
-	case "/tail":
+	case r.URL.Path == "/tail":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(terminalHTML)
+	case strings.HasPrefix(r.URL.Path, "/vendor/"):
+		srv.static.ServeHTTP(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -155,7 +165,14 @@ func main() {
 	account := aws.ToString(id.Account)
 	partition := partitionFromARN(aws.ToString(id.Arn))
 
-	srv := &Server{mgr: NewManager(cfg, *linger, partition, cfg.Region, account)}
+	vendor, err := fs.Sub(vendorFS, "web")
+	if err != nil {
+		log.Fatalf("embed vendor assets: %v", err)
+	}
+	srv := &Server{
+		mgr:    NewManager(cfg, *linger, partition, cfg.Region, account),
+		static: http.FileServerFS(vendor),
+	}
 
 	log.Printf("clterm listening on %s (region %s, account %s)", *addr, cfg.Region, account)
 	log.Printf("open  http://localhost%s/tail?group=<log-group>   (e.g. ?group=/aws/lambda/your-fn)", *addr)

@@ -83,6 +83,6 @@ group ARNs you want to expose.
   stalling the shared hub.
 - **No authorization** is built in: anyone who can reach the server can tail any
   group the process's IAM role allows. Put it behind your own authz.
-- The frontend loads xterm.js from a CDN. To ship a single self-contained
-  binary, vendor `xterm.min.js` / `xterm.min.css` / `addon-fit.min.js` into
-  `web/` and embed them too.
+- The frontend (xterm.js) is vendored under `web/vendor/` and embedded into
+  the binary, so there is no CDN dependency — it runs fully offline / in
+  closed networks. Those assets are MIT-licensed (see `web/vendor/xterm.LICENSE`).
