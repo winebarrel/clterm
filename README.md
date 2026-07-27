@@ -47,6 +47,24 @@ Standard AWS credential and region resolution applies (`AWS_PROFILE`,
 `-region` overrides the resolved region. A region must be set one way or the
 other, or startup fails.
 
+## Docker
+
+Multi-arch images (amd64/arm64) are published to
+`ghcr.io/winebarrel/clterm` on each release.
+
+```sh
+docker run --rm -p 8080:8080 \
+  -e AWS_REGION=ap-northeast-1 \
+  -v ~/.aws:/home/nonroot/.aws:ro -e AWS_PROFILE=your-profile \
+  ghcr.io/winebarrel/clterm:latest
+
+# then open http://localhost:8080/tail?group=/aws/lambda/your-fn
+```
+
+Supply credentials the usual container ways: env vars
+(`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`), a
+mounted `~/.aws`, or an instance/task role (EC2/ECS/EKS) with no extra config.
+
 ## URL scheme
 
 ```
