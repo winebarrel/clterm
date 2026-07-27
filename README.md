@@ -25,8 +25,8 @@ browser (xterm.js) --WebSocket--> clterm --StartLiveTail--> CloudWatch Logs
 ```sh
 go run . # listens on :8080
 
-# then open (note the double slash: the log group name starts with "/")
-open 'http://localhost:8080/tail//aws/lambda/your-fn'
+# then open
+open 'http://localhost:8080/tail?group=/aws/lambda/your-fn'
 ```
 
 Flags:
@@ -42,16 +42,13 @@ instance role, ...) via the default config chain.
 ## URL scheme
 
 ```
-/tail/<log-group>          the terminal page
-/ws/<log-group>            the WebSocket stream
-/ws/<log-group>?filter=... optional Live Tail filter pattern
+/tail?group=<log-group>            the terminal page
+/ws?group=<log-group>              the WebSocket stream
+/ws?group=<log-group>&filter=...   optional Live Tail filter pattern
 ```
 
-Everything after `/tail/` (or `/ws/`) is taken verbatim as the log group name.
-Because most groups start with `/`, the URL usually contains a double slash,
-e.g. `/tail//aws/lambda/foo` -> group `/aws/lambda/foo`. Routing deliberately
-avoids `net/http`'s `ServeMux` so the `//` is not normalized away. An ARN also
-works in place of the name.
+The log group is passed as the `group` query parameter, e.g.
+`/tail?group=/aws/lambda/foo`. An ARN also works in place of the name.
 
 ## IAM
 

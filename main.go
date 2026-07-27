@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -36,13 +35,13 @@ type Server struct {
 	mgr *Manager
 }
 
-// ServeHTTP routes without net/http's ServeMux so that a "//" in a log
-// group path (e.g. /tail//aws/lambda/foo) is not normalized away.
+// ServeHTTP routes the two endpoints. The log group is passed as the
+// ?group= query parameter, so no path parsing is involved.
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch {
-	case strings.HasPrefix(r.URL.Path, "/ws/"):
+	switch r.URL.Path {
+	case "/ws":
 		srv.handleWS(w, r)
-	case strings.HasPrefix(r.URL.Path, "/tail/"):
+	case "/tail":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(terminalHTML)
 	default:
@@ -51,11 +50,11 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWS upgrades the connection and attaches it to the hub for the
-// log group named by everything after "/ws/".
+// log group named by the ?group= query parameter.
 func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	group := strings.TrimPrefix(r.URL.Path, "/ws/")
+	group := r.URL.Query().Get("group")
 	if group == "" {
-		http.Error(w, "log group required", http.StatusBadRequest)
+		http.Error(w, "group required", http.StatusBadRequest)
 		return
 	}
 	var filter *string
@@ -137,6 +136,6 @@ func main() {
 	srv := &Server{mgr: NewManager(cloudwatchlogs.NewFromConfig(cfg), *linger)}
 
 	log.Printf("clterm listening on %s", *addr)
-	log.Printf("open  http://localhost%s/tail/<log-group>   (e.g. /tail//aws/lambda/your-fn)", *addr)
+	log.Printf("open  http://localhost%s/tail?group=<log-group>   (e.g. ?group=/aws/lambda/your-fn)", *addr)
 	log.Fatal(http.ListenAndServe(*addr, srv))
 }
