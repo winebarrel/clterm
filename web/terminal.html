@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>clterm</title>
+<link rel="stylesheet" href="/vendor/xterm.min.css">
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  #term{position:absolute;inset:8px 10px 8px 12px}
+  /* give the scrollback a little breathing room from the edges */
+  .xterm-viewport{scrollbar-width:thin}
+  #badge{position:absolute;top:6px;right:12px;z-index:10;
+    font:12px/1.6 ui-monospace,monospace;color:#9aa;
+    background:rgba(0,0,0,.55);padding:2px 8px;border-radius:4px}
+  #badge .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:#e33;margin-right:6px;vertical-align:middle;transition:.2s}
+  #badge.up .dot{background:#3c6}
+</style>
+</head>
+<body>
+<div id="term"></div>
+<div id="badge"><span class="dot"></span><span id="grp"></span></div>
+
+<script src="/vendor/xterm.min.js"></script>
+<script src="/vendor/addon-fit.min.js"></script>
+<script>
+const group = new URLSearchParams(location.search).get('group') || '';
+document.getElementById('grp').textContent = group;
+document.title = 'clterm ' + group;
+
+const term = new Terminal({
+  convertEol: true,     // render embedded \n in multi-line log events
+  scrollback: 50000,
+  fontSize: 13,
+  disableStdin: true,   // display only
+  theme: { background: '#000000' },
+});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('term'));
+fit.fit();
+addEventListener('resize', () => fit.fit());
+
+const badge = document.getElementById('badge');
+const dim = (s) => `\x1b[90m${s}\x1b[0m`;
+
+let ws, backoff = 500;
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws${location.search}`);
+  ws.onopen = () => { backoff = 500; badge.classList.add('up'); };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'log') {
+      const t = new Date(m.ts).toISOString().substr(11, 12);
+      const msg = m.message.replace(/\r?\n+$/, ''); // CW messages often carry a trailing newline
+      term.write(`${dim(t)} ${dim(m.stream)} ${msg}\r\n`);
+    } else if (m.type === 'notice') {
+      term.write(`\x1b[33m-- ${m.message} --\x1b[0m\r\n`); // yellow
+    } else {
+      term.write(`\x1b[36m-- ${m.message} --\x1b[0m\r\n`); // cyan (session)
+    }
+  };
+  ws.onclose = () => {
+    badge.classList.remove('up');
+    term.write(dim('-- disconnected, reconnecting... --') + '\r\n');
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff * 2, 10000);
+  };
+  ws.onerror = () => ws.close();
+}
+connect();
+</script>
+</body>
+</html>
