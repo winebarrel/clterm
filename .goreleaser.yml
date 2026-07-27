@@ -29,3 +29,37 @@ nfpms:
       - apk
       - deb
       - rpm
+dockers:
+  - id: amd64
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    use: buildx
+    image_templates:
+      - "ghcr.io/winebarrel/clterm:{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/winebarrel/clterm"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+  - id: arm64
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    use: buildx
+    image_templates:
+      - "ghcr.io/winebarrel/clterm:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/winebarrel/clterm"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+docker_manifests:
+  - name_template: "ghcr.io/winebarrel/clterm:{{ .Version }}"
+    image_templates: &manifest_images
+      - "ghcr.io/winebarrel/clterm:{{ .Version }}-amd64"
+      - "ghcr.io/winebarrel/clterm:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/winebarrel/clterm:latest"
+    image_templates: *manifest_images
