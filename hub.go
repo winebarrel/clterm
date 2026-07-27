@@ -33,9 +33,10 @@ type subscriber struct {
 // and fans its events out to every subscriber watching it.
 type Hub struct {
 	mgr     *Manager
-	key     string  // map key in the Manager
-	groupID string  // log group name or ARN
-	filter  *string // nil = no filter pattern
+	client  *cloudwatchlogs.Client // regional client for this group
+	key     string                 // map key in the Manager
+	groupID string                 // log group ARN
+	filter  *string                // nil = no filter pattern
 
 	mu        sync.Mutex
 	subs      map[*subscriber]struct{}
@@ -88,10 +89,10 @@ func (h *Hub) broadcast(msg []byte) {
 
 // tailLoop keeps a Live Tail session open, reconnecting when it ends
 // (the 3h session cap or transient errors) for as long as the hub lives.
-func (h *Hub) tailLoop(client *cloudwatchlogs.Client) {
+func (h *Hub) tailLoop() {
 	const backoff = time.Second
 	for h.ctx.Err() == nil {
-		if err := h.runSession(client); err != nil && h.ctx.Err() == nil {
+		if err := h.runSession(); err != nil && h.ctx.Err() == nil {
 			log.Printf("[%s] live tail ended: %v (reconnecting)", h.groupID, err)
 		}
 		if h.ctx.Err() != nil {
@@ -105,8 +106,8 @@ func (h *Hub) tailLoop(client *cloudwatchlogs.Client) {
 	}
 }
 
-func (h *Hub) runSession(client *cloudwatchlogs.Client) error {
-	out, err := client.StartLiveTail(h.ctx, &cloudwatchlogs.StartLiveTailInput{
+func (h *Hub) runSession() error {
+	out, err := h.client.StartLiveTail(h.ctx, &cloudwatchlogs.StartLiveTailInput{
 		LogGroupIdentifiers:   []string{h.groupID},
 		LogEventFilterPattern: h.filter,
 	})
@@ -150,50 +151,61 @@ func (h *Hub) emit(m wsMessage) {
 	}
 }
 
-// Manager maps a "log group (+ filter)" key to its Hub.
+// Manager maps a "log group (+ filter)" key to its Hub and hands out a
+// CloudWatch Logs client per region.
 type Manager struct {
-	client *cloudwatchlogs.Client
+	cfg    aws.Config
 	linger time.Duration
 
 	// Used to turn a bare log group name into an ARN, which StartLiveTail
-	// requires. Empty account/region means names cannot be resolved.
+	// requires.
 	partition string
-	region    string
+	region    string // default region when a request does not specify one
 	account   string
 
-	mu   sync.Mutex
-	hubs map[string]*Hub
+	mu      sync.Mutex
+	hubs    map[string]*Hub
+	clients map[string]*cloudwatchlogs.Client
 }
 
-func NewManager(c *cloudwatchlogs.Client, linger time.Duration, partition, region, account string) *Manager {
+func NewManager(cfg aws.Config, linger time.Duration, partition, region, account string) *Manager {
 	return &Manager{
-		client:    c,
+		cfg:       cfg,
 		linger:    linger,
 		partition: partition,
 		region:    region,
 		account:   account,
 		hubs:      map[string]*Hub{},
+		clients:   map[string]*cloudwatchlogs.Client{},
 	}
 }
 
-// resolveARN turns a bare log group name into the ARN that StartLiveTail
-// requires. An ARN passed in is used as-is (minus any trailing ":*",
-// which StartLiveTail rejects).
-func (m *Manager) resolveARN(group string) string {
+// resolve turns a name-or-ARN plus a requested region into the log group
+// ARN StartLiveTail needs and the region whose client must serve it. A
+// bare name uses reqRegion (or the default); an ARN carries its own region.
+func (m *Manager) resolve(group, reqRegion string) (arn, region string) {
 	if strings.HasPrefix(group, "arn:") {
-		return strings.TrimSuffix(group, ":*")
+		arn = strings.TrimSuffix(group, ":*")
+		if region = arnField(arn, 3); region == "" {
+			region = m.region
+		}
+		return arn, region
 	}
-	return fmt.Sprintf("arn:%s:logs:%s:%s:log-group:%s",
-		m.partition, m.region, m.account, group)
+	if region = reqRegion; region == "" {
+		region = m.region
+	}
+	arn = fmt.Sprintf("arn:%s:logs:%s:%s:log-group:%s", m.partition, region, m.account, group)
+	return arn, region
 }
 
-func (m *Manager) subscribe(groupID string, filter *string, s *subscriber) {
-	key := groupID
+func (m *Manager) subscribe(group, reqRegion string, filter *string, s *subscriber) {
+	arn, region := m.resolve(group, reqRegion)
+	key := arn
 	if filter != nil {
 		key += "\x00" + *filter
 	}
 	for {
-		h := m.getOrCreate(key, groupID, filter)
+		h := m.getOrCreate(key, arn, region, filter)
 		s.hub = h
 		if h.add(s) {
 			return
@@ -202,7 +214,7 @@ func (m *Manager) subscribe(groupID string, filter *string, s *subscriber) {
 	}
 }
 
-func (m *Manager) getOrCreate(key, groupID string, filter *string) *Hub {
+func (m *Manager) getOrCreate(key, arn, region string, filter *string) *Hub {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if h := m.hubs[key]; h != nil && !h.closed {
@@ -211,16 +223,38 @@ func (m *Manager) getOrCreate(key, groupID string, filter *string) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Hub{
 		mgr:     m,
+		client:  m.clientForLocked(region),
 		key:     key,
-		groupID: groupID,
+		groupID: arn,
 		filter:  filter,
 		subs:    map[*subscriber]struct{}{},
 		ctx:     ctx,
 		cancel:  cancel,
 	}
 	m.hubs[key] = h
-	go h.tailLoop(m.client)
+	go h.tailLoop()
 	return h
+}
+
+// clientForLocked returns a CloudWatch Logs client for the region,
+// creating and caching it on first use. Call with m.mu held.
+func (m *Manager) clientForLocked(region string) *cloudwatchlogs.Client {
+	if c := m.clients[region]; c != nil {
+		return c
+	}
+	c := cloudwatchlogs.NewFromConfig(m.cfg, func(o *cloudwatchlogs.Options) {
+		o.Region = region
+	})
+	m.clients[region] = c
+	return c
+}
+
+// arnField returns the i-th colon-separated field of an ARN, or "".
+func arnField(arn string, i int) string {
+	if parts := strings.Split(arn, ":"); i < len(parts) {
+		return parts[i]
+	}
+	return ""
 }
 
 func (m *Manager) gc(h *Hub) {

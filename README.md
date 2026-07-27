@@ -45,16 +45,19 @@ other, or startup fails.
 ## URL scheme
 
 ```
-/tail?group=<log-group>            the terminal page
-/ws?group=<log-group>              the WebSocket stream
-/ws?group=<log-group>&filter=...   optional Live Tail filter pattern
+/tail?group=<log-group>                    the terminal page
+/ws?group=<log-group>                      the WebSocket stream
+/ws?group=<log-group>&region=<region>      tail a group in another region
+/ws?group=<log-group>&filter=...           optional Live Tail filter pattern
 ```
 
 The log group is passed as the `group` query parameter, e.g.
 `/tail?group=/aws/lambda/foo`. `StartLiveTail` requires an ARN, so a bare name
 is resolved to `arn:<partition>:logs:<region>:<account>:log-group:<name>` using
-the configured region and the caller's account. To tail a group in **another
-region or account**, pass the full ARN as `group` instead.
+the caller's account and — unless `region` is given — the configured region.
+Add `region=<region>` to tail a group in another region; a per-region client is
+created and cached automatically. To tail a group in **another account**, pass
+its full ARN as `group` instead (the ARN's own region is used).
 
 ## IAM
 

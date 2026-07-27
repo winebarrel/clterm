@@ -13,7 +13,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/gorilla/websocket"
 )
@@ -59,6 +58,7 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "group required", http.StatusBadRequest)
 		return
 	}
+	region := r.URL.Query().Get("region") // optional; blank = default region
 	var filter *string
 	if f := r.URL.Query().Get("filter"); f != "" {
 		filter = aws.String(f)
@@ -68,8 +68,9 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := &subscriber{send: make(chan []byte, sendBuffer)}
-	// StartLiveTail needs an ARN; accept a bare name or an ARN.
-	srv.mgr.subscribe(srv.mgr.resolveARN(group), filter, s)
+	// StartLiveTail needs an ARN; accept a bare name (resolved with the
+	// requested or default region) or a full ARN.
+	srv.mgr.subscribe(group, region, filter, s)
 	go s.writePump(conn)
 	s.readPump(conn)
 }
@@ -154,8 +155,7 @@ func main() {
 	account := aws.ToString(id.Account)
 	partition := partitionFromARN(aws.ToString(id.Arn))
 
-	srv := &Server{mgr: NewManager(
-		cloudwatchlogs.NewFromConfig(cfg), *linger, partition, cfg.Region, account)}
+	srv := &Server{mgr: NewManager(cfg, *linger, partition, cfg.Region, account)}
 
 	log.Printf("clterm listening on %s (region %s, account %s)", *addr, cfg.Region, account)
 	log.Printf("open  http://localhost%s/tail?group=<log-group>   (e.g. ?group=/aws/lambda/your-fn)", *addr)
