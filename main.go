@@ -56,7 +56,7 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		srv.handleWS(w, r)
 	case r.URL.Path == "/tail":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(terminalHTML)
+		w.Write(terminalHTML) //nolint:errcheck
 	case strings.HasPrefix(r.URL.Path, "/vendor/"):
 		srv.static.ServeHTTP(w, r)
 	default:
@@ -94,10 +94,10 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 func (s *subscriber) readPump(conn *websocket.Conn) {
 	defer func() {
 		s.hub.remove(s)
-		_ = conn.Close()
+		conn.Close() //nolint:errcheck
 	}()
 	conn.SetReadLimit(512)
-	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(pongWait))
 	})
@@ -112,14 +112,15 @@ func (s *subscriber) writePump(conn *websocket.Conn) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		_ = conn.Close()
+		conn.Close() //nolint:errcheck
 	}()
 	for {
 		select {
 		case msg, ok := <-s.send:
-			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok { // hub closed the channel
-				_ = conn.WriteMessage(websocket.CloseMessage, nil)
+			conn.SetWriteDeadline(time.Now().Add(writeWait)) //nolint:errcheck
+			// hub closed the channel
+			if !ok {
+				conn.WriteMessage(websocket.CloseMessage, nil) //nolint:errcheck
 				return
 			}
 			if d := atomic.SwapUint64(&s.dropped, 0); d > 0 {
@@ -133,7 +134,7 @@ func (s *subscriber) writePump(conn *websocket.Conn) {
 				return
 			}
 		case <-ticker.C:
-			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			conn.SetWriteDeadline(time.Now().Add(writeWait)) //nolint:errcheck
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

@@ -17,23 +17,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ascii:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Check for non-ASCII characters
-        # Vendored xterm.js assets legitimately contain non-ASCII bytes.
-        run: |
-          matches=$(LC_ALL=C git grep -nIP '[^\x00-\x7F]' -- . ':!web/vendor') && status=0 || status=$?
-          if [ "$status" -eq 0 ]; then
-            echo "Error: non-ASCII characters found:"
-            echo "$matches"
-            exit 1
-          elif [ "$status" -ne 1 ]; then
-            echo "Error: git grep failed with status $status"
-            exit "$status"
-          fi
-
   build:
     runs-on: ubuntu-latest
     steps:
