@@ -7,12 +7,14 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/gorilla/websocket"
 )
 
@@ -66,7 +68,8 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := &subscriber{send: make(chan []byte, sendBuffer)}
-	srv.mgr.subscribe(group, filter, s)
+	// StartLiveTail needs an ARN; accept a bare name or an ARN.
+	srv.mgr.subscribe(srv.mgr.resolveARN(group), filter, s)
 	go s.writePump(conn)
 	s.readPump(conn)
 }
@@ -125,17 +128,45 @@ func (s *subscriber) writePump(conn *websocket.Conn) {
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
+	region := flag.String("region", "", "AWS region (default: from AWS config / AWS_REGION)")
 	linger := flag.Duration("linger", 15*time.Second,
 		"keep a Live Tail session open this long after the last viewer leaves")
 	flag.Parse()
 
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	var opts []func(*config.LoadOptions) error
+	if *region != "" {
+		opts = append(opts, config.WithRegion(*region))
+	}
+	cfg, err := config.LoadDefaultConfig(context.TODO(), opts...)
 	if err != nil {
 		log.Fatalf("load AWS config: %v", err)
 	}
-	srv := &Server{mgr: NewManager(cloudwatchlogs.NewFromConfig(cfg), *linger)}
+	if cfg.Region == "" {
+		log.Fatal("no AWS region configured: pass -region or set AWS_REGION")
+	}
 
-	log.Printf("clterm listening on %s", *addr)
+	// StartLiveTail needs log group ARNs, so resolve the account and
+	// partition once to build them from bare names.
+	id, err := sts.NewFromConfig(cfg).GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+	if err != nil {
+		log.Fatalf("get caller identity (needed to build log group ARNs): %v", err)
+	}
+	account := aws.ToString(id.Account)
+	partition := partitionFromARN(aws.ToString(id.Arn))
+
+	srv := &Server{mgr: NewManager(
+		cloudwatchlogs.NewFromConfig(cfg), *linger, partition, cfg.Region, account)}
+
+	log.Printf("clterm listening on %s (region %s, account %s)", *addr, cfg.Region, account)
 	log.Printf("open  http://localhost%s/tail?group=<log-group>   (e.g. ?group=/aws/lambda/your-fn)", *addr)
 	log.Fatal(http.ListenAndServe(*addr, srv))
+}
+
+// partitionFromARN extracts the partition (aws, aws-cn, aws-us-gov) from
+// an ARN, defaulting to "aws".
+func partitionFromARN(arn string) string {
+	if parts := strings.SplitN(arn, ":", 3); len(parts) >= 2 && parts[1] != "" {
+		return parts[1]
+	}
+	return "aws"
 }

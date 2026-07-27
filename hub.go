@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -153,12 +155,36 @@ type Manager struct {
 	client *cloudwatchlogs.Client
 	linger time.Duration
 
+	// Used to turn a bare log group name into an ARN, which StartLiveTail
+	// requires. Empty account/region means names cannot be resolved.
+	partition string
+	region    string
+	account   string
+
 	mu   sync.Mutex
 	hubs map[string]*Hub
 }
 
-func NewManager(c *cloudwatchlogs.Client, linger time.Duration) *Manager {
-	return &Manager{client: c, linger: linger, hubs: map[string]*Hub{}}
+func NewManager(c *cloudwatchlogs.Client, linger time.Duration, partition, region, account string) *Manager {
+	return &Manager{
+		client:    c,
+		linger:    linger,
+		partition: partition,
+		region:    region,
+		account:   account,
+		hubs:      map[string]*Hub{},
+	}
+}
+
+// resolveARN turns a bare log group name into the ARN that StartLiveTail
+// requires. An ARN passed in is used as-is (minus any trailing ":*",
+// which StartLiveTail rejects).
+func (m *Manager) resolveARN(group string) string {
+	if strings.HasPrefix(group, "arn:") {
+		return strings.TrimSuffix(group, ":*")
+	}
+	return fmt.Sprintf("arn:%s:logs:%s:%s:log-group:%s",
+		m.partition, m.region, m.account, group)
 }
 
 func (m *Manager) subscribe(groupID string, filter *string, s *subscriber) {

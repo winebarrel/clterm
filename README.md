@@ -34,10 +34,13 @@ Flags:
 | flag | default | meaning |
 |------|---------|---------|
 | `-addr`   | `:8080` | listen address |
+| `-region` | *(from config)* | AWS region; overrides `AWS_REGION` |
 | `-linger` | `15s`   | keep a session open this long after the last viewer leaves |
 
-Standard AWS credential resolution applies (`AWS_PROFILE`, env vars, SSO,
-instance role, ...) via the default config chain.
+Standard AWS credential and region resolution applies (`AWS_PROFILE`,
+`AWS_REGION`, env vars, SSO, instance role, ...) via the default config chain.
+`-region` overrides the resolved region. A region must be set one way or the
+other, or startup fails.
 
 ## URL scheme
 
@@ -48,17 +51,25 @@ instance role, ...) via the default config chain.
 ```
 
 The log group is passed as the `group` query parameter, e.g.
-`/tail?group=/aws/lambda/foo`. An ARN also works in place of the name.
+`/tail?group=/aws/lambda/foo`. `StartLiveTail` requires an ARN, so a bare name
+is resolved to `arn:<partition>:logs:<region>:<account>:log-group:<name>` using
+the configured region and the caller's account. To tail a group in **another
+region or account**, pass the full ARN as `group` instead.
 
 ## IAM
 
 The process needs:
 
 ```json
-{ "Effect": "Allow", "Action": "logs:StartLiveTail", "Resource": "*" }
+[
+  { "Effect": "Allow", "Action": "logs:StartLiveTail", "Resource": "*" },
+  { "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" }
+]
 ```
 
-Scope `Resource` to the log group ARNs you want to expose.
+`sts:GetCallerIdentity` (called once at startup) is used to build log group
+ARNs from bare names. Scope the `logs:StartLiveTail` `Resource` to the log
+group ARNs you want to expose.
 
 ## Notes / limits
 
