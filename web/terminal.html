@@ -24,7 +24,13 @@
 <script src="/vendor/xterm.min.js"></script>
 <script src="/vendor/addon-fit.min.js"></script>
 <script>
-const group = new URLSearchParams(location.search).get('group') || '';
+const params = new URLSearchParams(location.search);
+const group = params.get('group') || '';
+// The timestamp and log stream name are not part of the message; they are
+// hidden by default and opted in with time=1 / stream=1.
+const on = (v) => ['1', 'true', 'yes', 'on'].includes((v || '').toLowerCase());
+const showTime = on(params.get('time'));
+const showStream = on(params.get('stream'));
 document.getElementById('grp').textContent = group;
 document.title = 'clterm ' + group;
 
@@ -54,9 +60,12 @@ function connect() {
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === 'log') {
-      const t = new Date(m.ts).toISOString().substr(11, 12);
       const msg = m.message.replace(/\r?\n+$/, ''); // CW messages often carry a trailing newline
-      term.write(`${dim(t)} ${dim(m.stream)} ${msg}\r\n`);
+      const parts = [];
+      if (showTime) parts.push(dim(new Date(m.ts).toISOString().substr(11, 12)));
+      if (showStream) parts.push(dim(m.stream));
+      parts.push(msg);
+      term.write(parts.join(' ') + '\r\n');
     } else if (m.type === 'notice') {
       term.write(`\x1b[33m-- ${m.message} --\x1b[0m\r\n`); // yellow
     } else {

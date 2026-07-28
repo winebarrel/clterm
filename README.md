@@ -77,7 +77,14 @@ docker run --rm -p 8080:8080 \
 /ws?group=<log-group>&filter=...           raw CloudWatch Logs filter pattern
 /ws?group=<log-group>&q=...                literal search (auto-quoted)
 /ws?group=<log-group>&since=1h             replay recent history, then tail
+/tail?group=<log-group>&time=1&stream=1    prepend the timestamp / stream name
 ```
+
+By default the `/tail` page shows just the raw log message (e.g.
+`END RequestId: ...`). The timestamp and log stream name are not part of the
+message — the API returns them as separate fields — so they are opt-in:
+`time=1` prepends the timestamp, `stream=1` prepends the
+`2026/07/27/[$LATEST]...` stream name (each also accepts `true`/`yes`/`on`).
 
 `filter` is a raw [CloudWatch Logs filter pattern](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/FilterAndPatternSyntax.html)
 (supports `-exclude`, multiple AND terms, `{ $.level = "ERROR" }`, ...). If you
