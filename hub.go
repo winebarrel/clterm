@@ -26,7 +26,8 @@ type wsMessage struct {
 type subscriber struct {
 	hub     *Hub
 	send    chan []byte
-	dropped uint64 // lines dropped because this connection was too slow
+	done    chan struct{} // closed by writePump when the connection is gone
+	dropped uint64        // lines dropped because this connection was too slow
 }
 
 // Hub owns a single StartLiveTail session for one log group (+ filter)
@@ -211,6 +212,72 @@ func (m *Manager) subscribe(group, reqRegion string, filter *string, s *subscrib
 			return
 		}
 		// The hub was GC'd in the race window between lookup and add: retry.
+	}
+}
+
+// backfillMax caps how many past events a single connection replays, so a
+// wide -since window over a busy group cannot flood one viewer unbounded.
+const backfillMax = 10000
+
+// backfill replays past events over [now-since, now] to a single subscriber
+// before it attaches to the live tail, so a viewer sees recent history first.
+// It blocks on the subscriber's send channel (no dropping) and stops early if
+// the connection closes or the cap is reached.
+func (m *Manager) backfill(ctx context.Context, group, reqRegion string, filter *string, since time.Duration, s *subscriber) {
+	arn, region := m.resolve(group, reqRegion)
+	m.mu.Lock()
+	client := m.clientForLocked(region)
+	m.mu.Unlock()
+
+	now := time.Now()
+	in := &cloudwatchlogs.FilterLogEventsInput{
+		LogGroupIdentifier: aws.String(arn),
+		StartTime:          aws.Int64(now.Add(-since).UnixMilli()),
+		EndTime:            aws.Int64(now.UnixMilli()),
+		FilterPattern:      filter,
+	}
+	sent := 0
+	pager := cloudwatchlogs.NewFilterLogEventsPaginator(client, in)
+	for pager.HasMorePages() {
+		out, err := pager.NextPage(ctx)
+		if err != nil {
+			s.push(wsMessage{Type: "notice", Message: "history unavailable: " + err.Error()})
+			return
+		}
+		for _, ev := range out.Events {
+			if sent >= backfillMax {
+				s.push(wsMessage{Type: "notice",
+					Message: fmt.Sprintf("history truncated at %d events", backfillMax)})
+				return
+			}
+			if !s.push(wsMessage{
+				Type:    "log",
+				TS:      aws.ToInt64(ev.Timestamp),
+				Stream:  aws.ToString(ev.LogStreamName),
+				Message: aws.ToString(ev.Message),
+			}) {
+				return // connection closed
+			}
+			sent++
+		}
+	}
+	if sent > 0 {
+		s.push(wsMessage{Type: "session", Message: fmt.Sprintf("replayed %d past events", sent)})
+	}
+}
+
+// push blocks until the message is queued for this subscriber, or the
+// connection is gone. It returns false once the connection has closed.
+func (s *subscriber) push(m wsMessage) bool {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return true // skip this one, keep going
+	}
+	select {
+	case s.send <- b:
+		return true
+	case <-s.done:
+		return false
 	}
 }
 

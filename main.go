@@ -80,15 +80,29 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if f := r.URL.Query().Get("filter"); f != "" {
 		filter = aws.String(f)
 	}
+	var since time.Duration // optional; >0 = replay recent history first
+	if v := r.URL.Query().Get("since"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			http.Error(w, "invalid since (use e.g. 5m, 1h)", http.StatusBadRequest)
+			return
+		}
+		since = d
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	s := &subscriber{send: make(chan []byte, sendBuffer)}
+	s := &subscriber{send: make(chan []byte, sendBuffer), done: make(chan struct{})}
+	go s.writePump(conn)
+	// Replay recent history (if requested) before attaching to the live
+	// tail, so past events appear ahead of new ones.
+	if since > 0 {
+		srv.mgr.backfill(r.Context(), group, region, filter, since, s)
+	}
 	// StartLiveTail needs an ARN; accept a bare name (resolved with the
 	// requested or default region) or a full ARN.
 	srv.mgr.subscribe(group, region, filter, s)
-	go s.writePump(conn)
 	s.readPump(conn)
 }
 
@@ -115,7 +129,8 @@ func (s *subscriber) writePump(conn *websocket.Conn) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		conn.Close() //nolint:errcheck
+		conn.Close()  //nolint:errcheck
+		close(s.done) // let a running backfill know the connection is gone
 	}()
 	for {
 		select {
