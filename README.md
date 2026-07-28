@@ -78,10 +78,11 @@ docker run --rm -p 8080:8080 \
 /ws?group=<log-group>&since=1h             replay recent history, then tail
 ```
 
-`since` takes a Go duration (`5m`, `1h`, `2h`, ...). Before the live tail
-starts, past events in `[now-since, now]` are fetched with `FilterLogEvents`
-and replayed oldest-first (capped at 10,000 events; the same `filter` applies).
-It works on the page too, e.g. `/tail?group=/aws/lambda/foo&since=30m`.
+`since` takes a Go duration, extended with `d` (day) and `w` (week) units —
+`5m`, `1h`, `1d`, `1w3d12h`, ... Before the live tail starts, past events in
+`[now-since, now]` are fetched with `FilterLogEvents` and replayed oldest-first
+(capped at 10,000 events, oldest kept; the same `filter` applies). It works on
+the page too, e.g. `/tail?group=/aws/lambda/foo&since=1d`.
 
 The log group is passed as the `group` query parameter, e.g.
 `/tail?group=/aws/lambda/foo`. `StartLiveTail` requires an ARN, so a bare name

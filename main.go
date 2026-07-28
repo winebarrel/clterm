@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -82,9 +83,9 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	var since time.Duration // optional; >0 = replay recent history first
 	if v := r.URL.Query().Get("since"); v != "" {
-		d, err := time.ParseDuration(v)
+		d, err := parseSince(v)
 		if err != nil || d <= 0 {
-			http.Error(w, "invalid since (use e.g. 5m, 1h)", http.StatusBadRequest)
+			http.Error(w, "invalid since (use e.g. 5m, 1h, 1d, 1w)", http.StatusBadRequest)
 			return
 		}
 		since = d
@@ -217,6 +218,41 @@ func main() {
 	log.Printf("clterm listening on %s (region %s, account %s)", *addr, cfg.Region, account)
 	log.Printf("open  http://localhost%s/tail?group=<log-group>   (e.g. ?group=/aws/lambda/your-fn)", *addr)
 	log.Fatal(http.ListenAndServe(*addr, srv))
+}
+
+// dayWeekPrefix matches a leading "<n>d" or "<n>w" segment, which Go's
+// time.ParseDuration does not understand.
+var dayWeekPrefix = regexp.MustCompile(`^(\d+)([dw])`)
+
+// parseSince is time.ParseDuration extended with day (d) and week (w) units,
+// so windows like "1d" or "1w3d12h" work. Leading day/week segments are peeled
+// off and the remainder is handed to time.ParseDuration.
+func parseSince(v string) (time.Duration, error) {
+	var extra time.Duration
+	for {
+		m := dayWeekPrefix.FindStringSubmatch(v)
+		if m == nil {
+			break
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return 0, err
+		}
+		unit := 24 * time.Hour
+		if m[2] == "w" {
+			unit = 7 * 24 * time.Hour
+		}
+		extra += time.Duration(n) * unit
+		v = v[len(m[0]):]
+	}
+	if v == "" {
+		return extra, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, err
+	}
+	return extra + d, nil
 }
 
 // partitionFromARN extracts the partition (aws, aws-cn, aws-us-gov) from
