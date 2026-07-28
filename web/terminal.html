@@ -44,10 +44,12 @@ addEventListener('resize', () => fit.fit());
 const badge = document.getElementById('badge');
 const dim = (s) => `\x1b[90m${s}\x1b[0m`;
 
+const WS_BASE = '__WS_BASE__'; // substituted by the server to match -ws-path
+
 let ws, backoff = 500;
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws${location.search}`);
+  ws = new WebSocket(`${proto}://${location.host}${WS_BASE}${location.search}`);
   ws.onopen = () => { backoff = 500; badge.classList.add('up'); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);

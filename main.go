@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"flag"
@@ -44,19 +45,21 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	mgr    *Manager
-	static http.Handler // serves the embedded /vendor/ assets
+	mgr     *Manager
+	static  http.Handler // serves the embedded /vendor/ assets
+	html    []byte       // terminal.html with the WebSocket path substituted
+	wsRoute string       // the WebSocket endpoint path ("/ws" or "/ws/<value>")
 }
 
 // ServeHTTP routes the endpoints. The log group is passed as the ?group=
 // query parameter, so no path parsing is involved.
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
-	case r.URL.Path == "/ws":
+	case r.URL.Path == srv.wsRoute:
 		srv.handleWS(w, r)
 	case r.URL.Path == "/tail":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(terminalHTML) //nolint:errcheck
+		w.Write(srv.html) //nolint:errcheck
 	case strings.HasPrefix(r.URL.Path, "/vendor/"):
 		srv.static.ServeHTTP(w, r)
 	default:
@@ -147,6 +150,8 @@ func main() {
 	region := flag.String("region", "", "AWS region (default: from AWS config / AWS_REGION)")
 	linger := flag.Duration("linger", 15*time.Second,
 		"keep a Live Tail session open this long after the last viewer leaves")
+	wsPath := flag.String("ws-path", "",
+		"extra path segment for the WebSocket endpoint (e.g. -ws-path foo serves /ws/foo); default is /ws")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -180,9 +185,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("embed vendor assets: %v", err)
 	}
+	// The /tail page connects to the WebSocket endpoint, so bake the same
+	// path into the served HTML.
+	wsRoute := "/ws"
+	if seg := strings.Trim(*wsPath, "/"); seg != "" {
+		wsRoute = "/ws/" + seg
+	}
+	html := bytes.ReplaceAll(terminalHTML, []byte("__WS_BASE__"), []byte(wsRoute))
 	srv := &Server{
-		mgr:    NewManager(cfg, *linger, partition, cfg.Region, account),
-		static: http.FileServerFS(vendor),
+		mgr:     NewManager(cfg, *linger, partition, cfg.Region, account),
+		static:  http.FileServerFS(vendor),
+		html:    html,
+		wsRoute: wsRoute,
 	}
 
 	log.Printf("clterm listening on %s (region %s, account %s)", *addr, cfg.Region, account)
