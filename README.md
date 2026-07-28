@@ -9,7 +9,7 @@ browser terminal. Backed by the CloudWatch Logs
 (`StartLiveTail`) API, with fan-out so multiple people can watch the same log
 group over a single session.
 
-![](https://github.com/user-attachments/assets/07bc0cc5-1171-4041-801e-020fe7bf3988)
+![](https://github.com/user-attachments/assets/a947f7be-dee6-4719-99f5-120b7fe611d2)
 
 ## How it works
 
