@@ -74,9 +74,17 @@ docker run --rm -p 8080:8080 \
 /tail?group=<log-group>                    the terminal page
 /ws?group=<log-group>                      the WebSocket stream
 /ws?group=<log-group>&region=<region>      tail a group in another region
-/ws?group=<log-group>&filter=...           optional Live Tail filter pattern
+/ws?group=<log-group>&filter=...           raw CloudWatch Logs filter pattern
+/ws?group=<log-group>&q=...                literal search (auto-quoted)
 /ws?group=<log-group>&since=1h             replay recent history, then tail
 ```
+
+`filter` is a raw [CloudWatch Logs filter pattern](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/FilterAndPatternSyntax.html)
+(supports `-exclude`, multiple AND terms, `{ $.level = "ERROR" }`, ...). If you
+just want a plain substring and don't want to think about the syntax, use `q`
+instead — it is quoted and escaped for you, so `q=aaaa-` matches the literal
+`aaaa-`. When both are given, `filter` wins. Both apply to the history replay
+and the live tail alike.
 
 `since` takes a Go duration, extended with `d` (day) and `w` (week) units —
 `5m`, `1h`, `1d`, `1w3d12h`, ... Before the live tail starts, past events in

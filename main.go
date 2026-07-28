@@ -77,9 +77,13 @@ func (srv *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	region := r.URL.Query().Get("region") // optional; blank = default region
+	// filter is a raw CloudWatch Logs filter pattern; q is a plain string
+	// matched literally (auto-quoted). filter wins if both are given.
 	var filter *string
 	if f := r.URL.Query().Get("filter"); f != "" {
 		filter = aws.String(f)
+	} else if q := r.URL.Query().Get("q"); q != "" {
+		filter = aws.String(literalFilter(q))
 	}
 	var since time.Duration // optional; >0 = replay recent history first
 	if v := r.URL.Query().Get("since"); v != "" {
@@ -218,6 +222,16 @@ func main() {
 	log.Printf("clterm listening on %s (region %s, account %s)", *addr, cfg.Region, account)
 	log.Printf("open  http://localhost%s/tail?group=<log-group>   (e.g. ?group=/aws/lambda/your-fn)", *addr)
 	log.Fatal(http.ListenAndServe(*addr, srv))
+}
+
+// literalFilter turns a plain search string into a CloudWatch Logs filter
+// pattern that matches it verbatim, by quoting it and escaping the backslash
+// and double-quote the quoted form treats specially. So q=aaaa- becomes
+// "aaaa-" (a literal) instead of tripping the "-" exclusion operator.
+func literalFilter(v string) string {
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `"`, `\"`)
+	return `"` + v + `"`
 }
 
 // dayWeekPrefix matches a leading "<n>d" or "<n>w" segment, which Go's
